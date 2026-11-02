@@ -289,8 +289,14 @@ function injectLayoutAuthCheck() {
   let __path = __h.get('x-pathname') || __h.get('x-invoke-path')
     || __h.get('x-forwarded-uri') || __h.get('x-original-url') || __h.get('x-eo-path') || '';
   if (!__path) {
+    // 仅在 referer 与当前站点同域时才采信，否则会把控制台页面路径
+    // （如 /edgeone/makers/project/xxx/index）误当成站点路径
     const __ref = __h.get('referer') || '';
-    try { if (__ref) __path = new URL(__ref).pathname; } catch {}
+    const __host = __h.get('host') || '';
+    try {
+      const __ru = __ref ? new URL(__ref) : null;
+      if (__ru && __host && __ru.host === __host) __path = __ru.pathname;
+    } catch {}
   }
 
   // 关键：拿不到路径时不能回退成 '/'，否则 /login 自身会被当成 '/' 拦截，
