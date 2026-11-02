@@ -155,7 +155,17 @@ function patchEdgeFunctionEnvInjection() {
   } else if (!code.includes(marker)) {
     code = code.replace(
       target,
-      `${target}\n          ${marker}\n          if (typeof globalThis !== 'undefined' && globalThis.process?.env && context?.env) {\n            Object.assign(globalThis.process.env, context.env);\n          }`
+      `${target}\n          ${marker}\n          if (typeof globalThis !== 'undefined' && globalThis.process?.env && context?.env) {\n            Object.assign(globalThis.process.env, context.env);\n          }\n` +
+        `          /* edgeone-pathname-injected */\n` +
+        `          try {\n` +
+        `            if (request && (request.method === 'GET' || request.method === 'HEAD') && request.url) {\n` +
+        `              const __eoUrl = new URL(request.url);\n` +
+        `              const __eoHeaders = new Headers(request.headers);\n` +
+        `              __eoHeaders.set('x-pathname', __eoUrl.pathname);\n` +
+        `              __eoHeaders.set('x-search', __eoUrl.search);\n` +
+        `              request = new Request(request, { headers: __eoHeaders });\n` +
+        `            }\n` +
+        `          } catch {}\n`
     );
   }
 
@@ -276,15 +286,17 @@ function injectLayoutAuthCheck() {
   const authCheck = `
   // EdgeOne SSR auth guard
   const __h = await headers();
-  let __path = __h.get('x-pathname') || __h.get('x-invoke-path') || '';
+  let __path = __h.get('x-pathname') || __h.get('x-invoke-path')
+    || __h.get('x-forwarded-uri') || __h.get('x-original-url') || __h.get('x-eo-path') || '';
   if (!__path) {
     const __ref = __h.get('referer') || '';
     try { if (__ref) __path = new URL(__ref).pathname; } catch {}
   }
-  if (!__path) __path = '/';
 
+  // 关键：拿不到路径时不能回退成 '/'，否则 /login 自身会被当成 '/' 拦截，
+  // redirect('/login?redirect=%2F') 无限循环（表现为 307 死循环 / 502）
   const __skipPaths = ${pageSkipPaths};
-  if (!__skipPaths.some((p) => __path.startsWith(p))) {
+  if (__path && !__skipPaths.some((p) => __path.startsWith(p))) {
     const __cookieStore = await cookies();
     const __authCookie = __cookieStore.get('user_auth') || __cookieStore.get('auth');
     if (!__authCookie) {
